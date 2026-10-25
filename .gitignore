@@ -1,0 +1,25 @@
+# ---- 登录凭据与本地配置：绝对不能提交 ----
+cookies.json
+config.json
+*.local
+.env
+secrets/
+credentials.json
+
+# ---- 日志与临时文件 ----
+*.log
+test_dialog_synthetic.html
+check_title_synthetic.html
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

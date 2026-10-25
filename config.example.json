@@ -1,0 +1,15 @@
+{
+  "page_url": "https://cloud.tencent.com/act/pro/featured-202607",
+  "cookie_file": "cookies.json",
+  "log_file": "snap_browser.log",
+
+  "spec": "4核4G",
+  "marker": "300GB",
+  "price": "38",
+
+  "seckill_title": "限时秒杀",
+  "act_id": "1996855673581677",
+
+  "regions": ["广州", "上海", "北京"],
+  "dialog_markers": []
+}
