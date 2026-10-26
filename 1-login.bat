@@ -11,13 +11,13 @@ if not exist ".venv\Scripts\python.exe" (
     echo     .venv\Scripts\python.exe -m pip install -r requirements.txt
     echo     .venv\Scripts\python.exe -m playwright install chromium
     echo.
-    echo See README.md section "快速开始" for details.
+    echo See README.md section "Install" for details.
     echo.
     pause
     exit /b 1
 )
 
-echo Opening the browser for the QR login...
-".venv\Scripts\python.exe" snap_login.py
+echo Opening browser for QR login (Tencent Cloud)...
+".venv\Scripts\python.exe" get_cookies.py
 echo.
 pause

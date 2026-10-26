@@ -1,13 +1,13 @@
 """Read-only: does the module finder report the right section title?
 
-The section title decides which module is the flash-sale one (the one whose
-heading contains the "seckill_title" from config.json). The card has its OWN
-title element (uno3-buy-card__title), and that one must never be mistaken
-for the section title -- which is exactly what the older lookup did.
+The section title decides which module is the flash-sale one ("上云精选 ·
+限时秒杀"). The card has its OWN title element (uno3-buy-card__title), and
+that one must never be mistaken for the section title -- which is exactly
+what the older lookup did.
 
 Runs the lookup against:
   1. a LOCAL synthetic file that mirrors the real page structure
-  2. the live page, anonymously (no cookies, no clicking) with --live
+  2. the live page, anonymously (no cookies, no clicking)
 
 Prints the module list only. It never clicks anything.
 
@@ -21,22 +21,26 @@ from playwright.sync_api import sync_playwright
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-import snap_config
-from snap_target import GROUPS_JS
+from snap_target import GROUPS_JS, TARGET
+
+from snap_config import ACTIVITY_URL, PRICE_TEXT, SPEC_TEXT
+
+PAGE_URL = ACTIVITY_URL
+SECKILL_TITLE = "限时秒杀"
 
 # the same shape as the live page: a section heading, then a module whose
 # tab bar names PRODUCTS (not specs), whose cards carry their own title
-# element, and whose second card is a skeleton with no button at all.
+# element, and whose first card is a skeleton with no button at all.
 SYNTHETIC = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <div class="section">
-  <h2>上云精选 · %(seckill)s</h2>
+  <h2>上云精选 · 限时秒杀</h2>
   <div class="qc-base-module uno3-buy-card-wrap">
     <div class="qc-base-grid__layout">
       <div class="qc-base-grid__row">
         <div class="uno3-buy-card uno3-buy-card-normal">
           <div class="uno3-buy-card__title">轻量应用服务器</div>
-          <div class="uno3-buy-card__spec">%(spec)s</div>
-          <div class="uno3-buy-card__price">活动价：%(price)s元</div>
+          <div class="uno3-buy-card__spec">__SPEC__3M</div>
+          <div class="uno3-buy-card__price">活动价：__PRICE__</div>
           <div class="uno3-buy-card__btn">添加提醒</div>
         </div>
         <div class="uno3-buy-card uno3-skeleton">
@@ -53,8 +57,8 @@ SYNTHETIC = """<!doctype html><html><head><meta charset="utf-8"></head><body>
       <div class="qc-base-grid__row">
         <div class="uno3-buy-card uno3-buy-card-normal">
           <div class="uno3-buy-card__title">轻量应用服务器</div>
-          <div class="uno3-buy-card__spec">%(spec)s</div>
-          <div class="uno3-buy-card__price">活动价：%(other)s元</div>
+          <div class="uno3-buy-card__spec">__SPEC__3M</div>
+          <div class="uno3-buy-card__price">活动价：109元</div>
           <div class="uno3-buy-card__btn">立即购买</div>
         </div>
       </div>
@@ -62,14 +66,6 @@ SYNTHETIC = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   </div>
 </div>
 </body></html>"""
-
-
-def synthetic():
-    price = int(snap_config.PRICE)
-    return SYNTHETIC % {"seckill": snap_config.SECKILL_TITLE,
-                        "spec": snap_config.SPEC,
-                        "price": price,
-                        "other": price + 61}
 
 
 def show(groups):
@@ -83,7 +79,7 @@ def show(groups):
         print("  FAIL: expected exactly one flash-sale module, got %d"
               % len(seckill))
         return False
-    if snap_config.SECKILL_TITLE not in seckill[0]["title"]:
+    if not seckill[0]["title"].startswith("上云精选"):
         print("  FAIL: the flash-sale module's title is %r -- the card's own "
               "title element leaked in" % seckill[0]["title"])
         return False
@@ -99,7 +95,7 @@ def main():
     live = "--live" in sys.argv
     path = os.path.abspath("check_title_synthetic.html")
     with open(path, "w", encoding="utf-8") as f:
-        f.write(synthetic())
+        f.write(SYNTHETIC)
 
     ok = True
     with sync_playwright() as p:
@@ -107,17 +103,14 @@ def main():
         page = browser.new_page(viewport={"width": 1400, "height": 1000})
         page.goto("file:///" + path.replace("\\", "/"), wait_until="load")
         print("--- synthetic page ---")
-        ok = show(page.evaluate(GROUPS_JS,
-                                [snap_config.SPEC, snap_config.SECKILL_TITLE])) and ok
+        ok = show(page.evaluate(GROUPS_JS, [TARGET, SECKILL_TITLE])) and ok
 
         if live:
             print()
             print("--- live page (anonymous) ---")
-            page.goto(snap_config.PAGE_URL, wait_until="domcontentloaded",
-                      timeout=60000)
+            page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(6000)
-            groups = page.evaluate(GROUPS_JS,
-                                   [snap_config.SPEC, snap_config.SECKILL_TITLE])
+            groups = page.evaluate(GROUPS_JS, [TARGET, SECKILL_TITLE])
             print("%d module(s)" % len(groups))
             for i, g in enumerate(groups[:6]):
                 print("  [%d] seckill=%-5s spec=%-5s top=%-6d title=%-22r tabs=%s"
@@ -133,6 +126,10 @@ def main():
     os.remove(path)
     raise SystemExit(0 if ok else 1)
 
+
+# the sample page follows the configuration
+SYNTHETIC = (SYNTHETIC.replace("__SPEC__", SPEC_TEXT)
+                    .replace("__PRICE__", PRICE_TEXT))
 
 if __name__ == "__main__":
     main()

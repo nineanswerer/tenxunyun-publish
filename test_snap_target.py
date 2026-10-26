@@ -1,14 +1,10 @@
 """Offline test of the flash-sale button locator.
 
-Builds a synthetic copy of an activity page -- with the traps that break a
-naive locator: a card that has our spec at a normal price, a module whose
-cards are still skeletons (empty button text), a price that merely CONTAINS
-our price (138元 next to 38元), and the look-alike progress class
-uno3-buy-card__btn-progress -- then checks that the locator picks the
-立即抢购 button of the right card and nothing else.
-
-The fixture is built from config.json, so the test follows whatever product
-the buyer is currently aimed at.
+Builds a synthetic copy of the *current* activity page -- with the traps that
+break a naive locator: a plain 109元 card that also says 4核4G3M, a module
+whose cards are still skeletons (empty button text), a 138元 decoy, and the
+look-alike progress class uno3-buy-card__btn-progress -- then checks that the
+locator picks the 立即抢购 button of the 38元 4核4G card and nothing else.
 
 No network, no account, no purchase: the page is a local string.
 
@@ -18,21 +14,12 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-import snap_config
-from snap_config import MARKER, SPEC, price_pattern, price_re
 from snap_target import (BTN_ATTR, BTN_CLASS, CARD_ATTR, GROUPS_JS, IDX_ATTR,
-                         MARK_ATTR, RESOLVE_JS, pick, score)
+                         MARK_ATTR, MARKER, RESOLVE_JS, TARGET, pick, score)
+
+from snap_config import (MARKER_TEXT, PRICE_NUMBER, PRICE_TEXT, SPEC_TEXT)
 
 sys.stdout.reconfigure(encoding="utf-8")
-
-PRICE = snap_config.PRICE
-QUOTA = "%s 月流量" % snap_config.MARKER
-# a price that merely CONTAINS ours (38 -> 138): must not be read as ours
-SUBSTRING_PRICE = "1" + PRICE
-# a price that starts with ours (38 -> 388): must not be read as ours either
-SUFFIX_PRICE = PRICE + "8"
-# a plain, unrelated price for the same spec somewhere else on the page
-OTHER_PRICE = str(int(PRICE) + 61)
 
 CARD = """
 <div class="uno3-buy-card uno3-buy-card-normal%(skel)s">
@@ -80,22 +67,24 @@ def module(tabs, cards):
 # looks for a tab mentioning the spec never reaches this module
 SECKILL = module(
     ["轻量应用服务器", "轻量对象存储", "企业网盘", "云开发 CloudBase"],
-    [card("轻量应用服务器", SPEC, QUOTA, PRICE, "添加提醒", progress=True),
+    [card("轻量应用服务器", SPEC_TEXT + "3M", MARKER_TEXT + " 月流量",
+          PRICE_NUMBER, "添加提醒", progress=True),
      card("轻量对象存储", "10GB", "1GB 外网下行流量", "18", "添加提醒"),
      card("企业网盘", "企业版", "10人", "9", "添加提醒")])
 
-# the 首单特惠 module: the same spec at a normal price, plus a skeleton card
-# (no button at all) and a decoy whose price merely contains ours
+# the 首单特惠 module: the same spec at a different price, plus a skeleton
+# card (no button at all) and a 138元 decoy
 FIRST_ORDER = module(
-    ["轻量应用服务器 %s3M" % SPEC, "轻量应用服务器 4核8G5M"],
-    [card("轻量应用服务器", SPEC, QUOTA, OTHER_PRICE, "立即购买"),
+    ["轻量应用服务器 " + SPEC_TEXT + "3M", "轻量应用服务器 4核8G5M"],
+    [card("轻量应用服务器", SPEC_TEXT + "3M", MARKER_TEXT + " 月流量",
+          "109", "立即购买"),
      card("轻量应用服务器", "2核2G3M", "不限流量", "9", "", skeleton=True),
-     card("轻量应用服务器", "4核8G5M", "500GB 月流量", SUBSTRING_PRICE, "立即购买")])
+     card("轻量应用服务器", "4核8G5M", "500GB 月流量", "138", "立即购买")])
 
 # a module whose card does not print the spec -- only the tab does
 AGENT = module(
-    ["LH Agent %s" % SPEC],
-    [card("LH Agent", SPEC, "不限流量", PRICE, "添加提醒")])
+    ["另一个商品 " + SPEC_TEXT + "3M"],
+    [card("另一个商品", SPEC_TEXT, "不限流量", PRICE_NUMBER, "添加提醒")])
 
 PAGE = """
 <!doctype html><html><head><meta charset="utf-8"><style>
@@ -107,7 +96,7 @@ body { margin: 0; font-family: sans-serif; }
 </style></head><body>
 
 <div class="section">
-  <h2>上云精选 · %(seckill_title)s</h2>
+  <h2>上云精选 · 限时秒杀</h2>
   %(seckill)s
 </div>
 
@@ -122,8 +111,7 @@ body { margin: 0; font-family: sans-serif; }
 </div>
 
 </body></html>
-""" % {"seckill": SECKILL, "first": FIRST_ORDER, "agent": AGENT,
-       "seckill_title": snap_config.SECKILL_TITLE}
+""" % {"seckill": SECKILL, "first": FIRST_ORDER, "agent": AGENT}
 
 failures = []
 
@@ -140,18 +128,17 @@ with sync_playwright() as p:
     page = browser.new_page(viewport={"width": 1400, "height": 1000})
     page.set_content(PAGE, wait_until="load")
 
-    cands = page.evaluate(RESOLVE_JS, [SPEC, MARKER, price_pattern(PRICE),
+    cands = page.evaluate(RESOLVE_JS, [TARGET, MARKER, BTN_CLASS,
                                         ["添加提醒", "取消提醒", "立即抢购", "已抢光",
                                          "已结束", "正在处理", "已抢完"],
                                         IDX_ATTR, CARD_ATTR])
-    groups = page.evaluate(GROUPS_JS, [SPEC, snap_config.SECKILL_TITLE])
+    groups = page.evaluate(GROUPS_JS, [TARGET, "限时秒杀"])
     browser.close()
 
-print("target: %s / %s / %s元" % (SPEC, MARKER, PRICE))
 print("candidates:")
 for c in cands:
-    print("  [%d] %-8r score=%d target=%-5s price=%-5s marker=%-5s byTab=%-5s | %s"
-          % (c["idx"], c["text"], score(c), c["hasTarget"], c["hasPrice"],
+    print("  [%d] %-8r score=%d target=%-5s 38=%-5s marker=%-5s byTab=%-5s | %s"
+          % (c["idx"], c["text"], score(c), c["hasTarget"], c["has38"],
              c["hasMarker"], c["byTab"], c["card"][:90]))
 
 print()
@@ -166,35 +153,35 @@ check("skeleton card not a candidate",
       all("2核2G3M" not in c["card"] for c in cands),
       str([c["card"][:40] for c in cands]))
 
-# 3. the winner is our card
+# 3. the winner is the 38元 4核4G card
 best = pick(cands)
 check("a winner was found", best is not None)
 if best:
     check("winner card has the spec", best["hasTarget"] or best["byTab"])
-    check("winner card has the marker", best["hasMarker"], repr(best["card"][:80]))
-    check("winner card has our price", best["hasPrice"], repr(best["card"][:80]))
-    check("winner is not the normal-price card",
-          ("活动价：%s元" % OTHER_PRICE) not in best["card"], best["card"][:80])
-    check("winner is not the look-alike price card",
-          ("活动价：%s元" % SUBSTRING_PRICE) not in best["card"],
+    check("winner card has %s" % MARKER_TEXT, best["hasMarker"],
+          repr(best["card"][:80]))
+    check("winner card is the %s one" % PRICE_TEXT, best["has38"],
+          repr(best["card"][:80]))
+    check("winner is not the 109元 card", "109" not in best["card"],
           best["card"][:80])
+    check("winner is not the decoy card",
+          ("1" + PRICE_NUMBER) not in best["card"], best["card"][:80])
 
-# 4. our price must be what decides -- the normal-price card mentions the
-#    spec too
+# 4. the 38元 price must be what decides -- the 109元 card mentions the spec too
 others = [c for c in cands
           if best is not None and c is not best and c["hasTarget"]
           and c["hasMarker"]]
-check("the normal-price card scores lower",
-      not others or score(others[0]) < score(best),
+check("the 109元 card scores lower", not others or score(others[0]) < score(best),
       "decoy=%d winner=%d" % (score(others[0]), score(best)) if others else "")
 
-# 5. the price regex must not fire on a price that merely contains ours
-check("%s元 is not read as %s元" % (SUBSTRING_PRICE, PRICE),
-      not price_re(PRICE).search("活动价：%s元" % SUBSTRING_PRICE))
-check("%s元 is not read as %s元" % (SUFFIX_PRICE, PRICE),
-      not price_re(PRICE).search("活动价：%s元" % SUFFIX_PRICE))
-check("%s元 is read as %s元" % (PRICE, PRICE),
-      bool(price_re(PRICE).search("活动价：%s元" % PRICE)))
+# 5. the price regex must not fire on 138元 / 109元
+from snap_target import PRICE_38
+check("a decoy price is not read as %s" % PRICE_TEXT,
+      not PRICE_38.search("活动价：1" + PRICE_NUMBER + "元"))
+check("another decoy is not read as %s" % PRICE_TEXT,
+      not PRICE_38.search("活动价：2" + PRICE_NUMBER + "元"))
+check("%s is read as %s" % (PRICE_TEXT, PRICE_TEXT),
+      bool(PRICE_38.search("活动价：" + PRICE_TEXT)))
 
 # 6. the module finder must reach the flash-sale module -- its tab bar names
 #    products, not specs, so searching the tabs for the spec misses it
@@ -219,18 +206,16 @@ with sync_playwright() as p:
     page.set_content(PAGE, wait_until="load")
     page.evaluate(
         """
-        (price) => {
+        () => {
             window.__clicked = [];
             document.querySelectorAll("div.uno3-buy-card__btn").forEach((b) => {
                 b.addEventListener("click", () => {
                     const card = b.closest(".uno3-buy-card");
                     window.__clicked.push(
-                        (card.textContent || "").includes("活动价：" + price + "元")
-                        ? "TARGET" : "OTHER");
+                        (card.textContent || "").includes("活动价：__PRICE__") ? "TARGET" : "OTHER");
                 });
             });
-        }""",
-        PRICE,
+        }""".replace("__PRICE__", PRICE_TEXT)
     )
 
     cands = snap_browser.scan(page)
@@ -251,10 +236,10 @@ with sync_playwright() as p:
     check("the marked button is the 添加提醒 one",
           any(m.startswith("uno3-buy-card__btn") and "添加提醒" in m for m in marked),
           str(marked))
-    check("the marked card is ours",
-          any("活动价：%s元" % PRICE in m for m in marked), str(marked))
-    check("the marked card is not the normal-price one",
-          not any("活动价：%s元" % OTHER_PRICE in m for m in marked), str(marked))
+    check("the marked card is the %s one" % PRICE_TEXT,
+          any(("活动价：" + PRICE_TEXT) in m for m in marked), str(marked))
+    check("the marked card is not the 109元 one",
+          not any("活动价：109元" in m for m in marked), str(marked))
 
     btn = page.evaluate(
         """
@@ -280,7 +265,7 @@ with sync_playwright() as p:
     ok = snap_browser.click_target(page)
     clicked = page.evaluate("() => window.__clicked")
     check("click_target reported success", ok)
-    check("the click landed on our card",
+    check("the click landed on the %s card" % PRICE_TEXT,
           clicked == ["TARGET"], "clicked=%s" % clicked)
 
     # the label of the marked button is readable without a DOM scan

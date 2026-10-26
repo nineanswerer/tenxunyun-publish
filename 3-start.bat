@@ -11,16 +11,16 @@ if not exist ".venv\Scripts\python.exe" (
     echo     .venv\Scripts\python.exe -m pip install -r requirements.txt
     echo     .venv\Scripts\python.exe -m playwright install chromium
     echo.
-    echo See README.md section "快速开始" for details.
+    echo See README.md section "Install" for details.
     echo.
     pause
     exit /b 1
 )
 
-echo Starting the buyer. Do NOT minimize the browser window.
-echo The script clicks the buy button and confirms the dialog.
+echo REAL seckill mode - the real page places the real order.
+echo Start 5-10 minutes before the session opens. Do NOT minimize the window.
+echo The script clicks the buy button and confirms the buy dialog.
 echo YOU pay in that window.
-echo.
 ".venv\Scripts\python.exe" snap_browser.py %*
 echo.
 pause

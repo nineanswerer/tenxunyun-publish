@@ -1,14 +1,21 @@
-"""Locator for the flash-sale buy button.
+"""Locator for the 38元 4核4G flash-sale buy button.
 
 Kept apart from snap_browser.py so the element logic can be tested offline
 against a synthetic copy of the page (see test_snap_target.py) without opening
 a browser against the live site.
 
-Nothing here knows about a particular product: the spec, the marker and the
-price come from snap_config (config.json), and the price reaches the page as
-a plain regex string.
+The button the user pointed at is
 
-**The page's structure:** every product group is a module
+    <div class="uno3-buy-card__btn">添加提醒</div>
+
+which becomes
+
+    <div class="uno3-buy-card__btn">立即抢购</div>
+
+once the 15:00 session opens.
+
+**The page's structure (rebuilt for the 双11 campaign, 2026-10-25):** every
+product group is a module
 
     div.qc-base-module.uno3-buy-card-wrap
       ├── div.uno3-buy-card-tab            (a tab per product variant)
@@ -23,27 +30,30 @@ Two traps:
 * the card is a **skeleton** until its module is scrolled into view, so the
   button has no text at all and the whole group has to be on screen before
   the button can be found;
-* the same card often exists in more than one module (the flash price in
-  one, a normal price in another), so the price is what decides which one
-  is ours.
+* the same 4核4G card exists in more than one module (38元 here, 109元
+  elsewhere), so the price is what decides which one is ours.
 
-The rule: the card must mention the spec, and it must be the cheap one.
+The rule: the card must mention the spec, and it must be the 38元 one.
 """
-from snap_config import price_pattern, price_re  # noqa: F401  (re-exported)
+import re
 
+from snap_config import MARKER_TEXT, PRICE_38_RE, PRICE_NUMBER, SPEC_TEXT
+
+TARGET = SPEC_TEXT        # spec printed on the card
+MARKER = MARKER_TEXT      # traffic quota, printed on the card
 BTN_CLASS = "div.uno3-buy-card__btn"
 IDX_ATTR = "data-snap-idx"        # candidate index, set on the button
 CARD_ATTR = "data-snap-card"      # candidate index, set on its card
 MARK_ATTR = "data-snap-target"    # the winner (button + card)
 BTN_ATTR = "data-snap-btn"        # the winner button only
-
-# The labels the button goes through. They belong to the page, not to a
-# campaign, but they do change when the page is rebuilt.
 SEKILL_WORDS = ("添加提醒", "取消提醒", "立即抢购", "已抢光", "已结束",
                 "正在处理", "已抢完")
 BUY_WORDS = ("立即抢购",)
 CONFIRM_WORDS = ("确认购买", "确认下单", "提交订单", "立即支付", "去支付",
                  "确定", "确认", "立即购买")
+
+# the flash-sale price, but not 138元 / 38.5元; also "¥38"
+PRICE_38 = re.compile(PRICE_38_RE)
 
 
 def is_buy_text(text):
@@ -61,7 +71,7 @@ def is_buy_text(text):
 
 
 def score(c):
-    """How sure are we that this is the card we want? Higher is better."""
+    """How sure are we that this is the 38元 4核4G card? Higher is better."""
     s = 0
     if c.get("hasTarget"):
         s += 4
@@ -69,22 +79,21 @@ def score(c):
         s += 3
     if c.get("hasMarker"):
         s += 2
-    if c.get("hasPrice"):
+    if c.get("has38"):
         s += 1
     return s
 
 
 def pick(cands):
-    """The best candidate: the card with our spec that carries our price.
+    """The best candidate: the 4核4G card that costs 38元.
 
-    Several cards mention the spec. The one priced like the flash sale is
-    the one we want; if any candidate carries that price, only those are
-    considered.
+    Several cards mention the spec. The one that is priced 38元 is the flash
+    sale; if any candidate carries that price, only those are considered.
     """
     pool = [c for c in cands
             if (c.get("hasTarget") or c.get("byTab"))
-            and (c.get("hasMarker") or c.get("hasPrice"))]
-    priced = [c for c in pool if c.get("hasPrice")]
+            and (c.get("hasMarker") or c.get("has38"))]
+    priced = [c for c in pool if c.get("has38")]
     if priced:
         pool = priced
     best = None
@@ -95,7 +104,7 @@ def pick(cands):
 
 
 RESOLVE_JS = """
-([target, marker, priceRe, words, idxAttr, cardAttr]) => {
+([target, marker, btnSel, words, idxAttr, cardAttr]) => {
     const norm = (s) => (s || "").replace(/\\s+/g, " ").trim();
     const tokens = (el) => String(el.className || "").split(/\\s+/);
     // the product card: a class token uno3-buy-card* without "__"
@@ -104,8 +113,7 @@ RESOLVE_JS = """
                t !== "uno3-buy-card-wrap" && t !== "uno3-buy-card-tab" &&
                t !== "uno3-buy-card-tab-item");
     const isWrap = (el) => tokens(el).includes("uno3-buy-card-wrap");
-    // the flash price -- the pattern is built in Python and arrives ready
-    const PRICE = new RegExp(priceRe);
+    const P38 = /(?<![\\d.])__PRICE__(?:\\.\\d+)?\\s*元|¥\\s*__PRICE__(?:\\.\\d+)?(?!\\d)/;
 
     // The section title above a module ("上云精选 · 限时秒杀").
     //
@@ -190,7 +198,7 @@ RESOLVE_JS = """
             card: cardText.slice(0, 1200),
             hasTarget: cardText.includes(target),
             hasMarker: cardText.includes(marker),
-            hasPrice: PRICE.test(cardText),
+            has38: P38.test(cardText),
             byTab: byTab,
             title: title,
             tabs: tabs.join(" / ").slice(0, 300),
@@ -204,12 +212,15 @@ RESOLVE_JS = """
 }
 """
 
-# Every product module on the page, the flash-sale one first.
+# Every product module on the page, flash-sale first.
 #
-# The flash-sale module has a tab bar of PRODUCT NAMES -- 轻量应用服务器 |
-# 轻量对象存储 | 企业网盘 | 云开发 CloudBase -- so looking for a module whose
-# tab mentions the spec never finds it. Every module is therefore listed, the
-# flash-sale one first, and each is scrolled into view and scanned in turn.
+# The flash-sale module ("上云精选 · 限时秒杀") has a tab bar of PRODUCT NAMES
+# -- 轻量应用服务器 | 轻量对象存储 | 企业网盘 | 云开发 CloudBase -- so looking
+# for a module whose tab mentions the spec never finds it. Every module is
+# therefore listed, the flash-sale one first, and each is scrolled into view
+# and scanned in turn.
+RESOLVE_JS = RESOLVE_JS.replace("__PRICE__", re.escape(PRICE_NUMBER))
+
 GROUPS_JS = """
 ([target, titleWord]) => {
     const norm = (s) => (s || "").replace(/\\s+/g, " ").trim();
