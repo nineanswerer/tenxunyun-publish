@@ -30,7 +30,8 @@ from snap_browser import (BUY_MARKERS, CONFIRM_WORDS, DIALOG_CONFIRM,
                           DIALOG_CONFIRM_JS, DIALOG_FIND_JS, DIALOG_REGION_JS,
                           DLG_TAG, PANEL_ONLY, PANEL_SEL, PRICE_RE,
                           REGION_WORDS, STRONG_CONFIRM)
-from snap_config import MARKER_TEXT, PRICE_TEXT, REGION_WORDS, SPEC_TEXT
+from snap_config import (MARKER_TEXT, PRICE_NUMBER, PRICE_TEXT,
+                         REGION_WORDS, SPEC_TEXT)
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -58,6 +59,27 @@ DIALOG = """
 
 # The same dialog, but with a class name nobody would guess.
 DIALOG_ODD = DIALOG.replace("qc-modal buy-dialog", "xyz-order-box")
+
+# Our dialog with BOTH prices on it: 活动价：38元 AND 日常价：780元. That is
+# what the real panel looks like -- the card itself quotes both. The b5
+# rule "more than one price on the box => not a dialog" threw our own
+# panel away, and on 2026-10-27 the run could not tell a missed dialog
+# from a missing one.
+DIALOG_TWO_PRICES = """
+<div class="qc-modal buy-dialog" style="position:fixed;left:200px;top:120px;
+     width:520px;background:#fff;padding:16px;z-index:10">
+  <div class="buy-dialog__title">确认订单</div>
+  <div class="buy-dialog__goods">轻量应用服务器 __SPEC__3M __QUOTA__ 月流量</div>
+  <div class="buy-dialog__price">活动价：__PRICE__ 日常价：__DAILY__</div>
+  <div class="buy-dialog__region">地域：
+    <span class="region-item">__R0__</span>
+  </div>
+  <div class="buy-dialog__footer">
+    <button class="btn btn-cancel">取消</button>
+    <button class="btn btn-ok">确认购买</button>
+  </div>
+</div>
+"""
 
 # A full-screen overlay that happens to contain the product card: it names our
 # product and it is huge, so it must never be taken for the dialog.
@@ -260,24 +282,29 @@ def main():
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(build(DIALOG_ODD))
         page.goto("file:///" + path.replace("\\", "/"), wait_until="load")
+        # b6 looks for the panel by its CONTENT, so an unknown class name
+        # is no longer a problem: the dialog is found, and its own 确认购买
+        # is the button that gets clicked -- the stray 确定 is still left
+        # alone. (b5 could not do this: it only knew a list of class names.)
         found = page.evaluate(DIALOG_FIND_JS,
                               [PANEL_SEL, list(BUY_MARKERS), list(CONFIRM_WORDS),
                                DLG_TAG])
-        if found:
-            print("  FAIL: a panel was matched by a class we do not know -- %r"
-                  % found["text"][:120])
+        if not found:
+            print("  FAIL: the dialog was not found, though its class is odd")
+            ok = False
+        elif PRICE_TEXT not in found["text"]:
+            print("  FAIL: the wrong panel was picked -- %r" % found["text"][:120])
             ok = False
         else:
-            print("  ok: no panel is matched by the unknown class")
+            print("  ok: the dialog is found by its content -- %dx%d buttons=%s"
+                  % (found["w"], found["h"], found["buttons"]))
         got = page.evaluate(DIALOG_CONFIRM_JS,
                             [DLG_TAG, list(DIALOG_CONFIRM), list(STRONG_CONFIRM)])
         hit = clicked(page)
         if got and got["text"] == "确认购买" and "确定" not in hit:
-            print("  ok: the unique 确认购买 is clicked as a fallback -- %r"
-                  % got["text"])
+            print("  ok: its own 确认购买 is clicked -- %r" % got["text"])
         else:
-            print("  FAIL: the fallback did not click the order button -- %r %s"
-                  % (got, hit))
+            print("  FAIL: the order button was not clicked -- %r %s" % (got, hit))
             ok = False
 
         # ---- 3. no dialog at all ----------------------------------------
@@ -384,6 +411,33 @@ def main():
         else:
             print("  ok: 立即支付 was NOT clicked -- nothing was clicked")
 
+        # ---- 9. our dialog shows BOTH prices ----------------------------
+        # This is what the real panel looks like. b5 refused it (two prices
+        # on the box => "not a dialog"), so our own panel was thrown away
+        # and the run could not tell a missed dialog from a missing one.
+        print("\n--- our dialog shows both prices ---")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(build(DIALOG_TWO_PRICES))
+        page.goto("file:///" + path.replace("\\", "/"), wait_until="load")
+        found = page.evaluate(DIALOG_FIND_JS,
+                              [PANEL_SEL, list(BUY_MARKERS), list(CONFIRM_WORDS),
+                               DLG_TAG, PRICE_RE])
+        if not found:
+            print("  FAIL: our own dialog was thrown away because it quotes "
+                  "two prices")
+            ok = False
+        else:
+            print("  ok: the dialog is found -- buttons=%s" % found["buttons"])
+        got = page.evaluate(DIALOG_CONFIRM_JS,
+                            [DLG_TAG, list(DIALOG_CONFIRM), list(STRONG_CONFIRM),
+                             list(PANEL_ONLY)])
+        hit = clicked(page)
+        if got and got["text"] == "确认购买" and "确定" not in hit:
+            print("  ok: its own 确认购买 is clicked -- %r" % got["text"])
+        else:
+            print("  FAIL: the order button was not clicked -- %r %s" % (got, hit))
+            ok = False
+
         browser.close()
     os.remove(path)
     print()
@@ -394,11 +448,13 @@ def main():
 # The sample pages are written with placeholders and filled in from the
 # configuration, so they follow whatever product the reader sets up.
 for _name in ("DIALOG", "DIALOG_ODD", "MASK", "BANNER", "PRODUCT_ROW",
-              "DIALOG_CTA_BUY", "DIALOG_PAY"):
+              "DIALOG_CTA_BUY", "DIALOG_PAY", "DIALOG_TWO_PRICES"):
     globals()[_name] = (globals()[_name]
                         .replace("__SPEC__", SPEC_TEXT)
                         .replace("__PRICE__", PRICE_TEXT)
                         .replace("__QUOTA__", MARKER_TEXT)
+                        .replace("__DAILY__",
+                                 "%d元" % (int(PRICE_NUMBER) * 20))
                         .replace("__R0__", REGION_WORDS[0])
                         .replace("__R1__", REGION_WORDS[1 % len(REGION_WORDS)])
                         .replace("__R2__", REGION_WORDS[2 % len(REGION_WORDS)]))

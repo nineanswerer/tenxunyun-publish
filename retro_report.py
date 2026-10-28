@@ -51,6 +51,12 @@ def infer_verdict(lines):
 
     if any(p in body for p in ORDER_PATHS):
         return "OK_ORDER_CREATED", "下单请求发出去了。"
+    # the server says the goods are gone -- that is the whole story, and
+    # it must not be mistaken for "the panel was not recognised"
+    if "1100136" in body or "售罄" in body:
+        return "FAIL_SOLD_OUT", "服务器说这一场的货已经卖完了。"
+    if "1101001" in body or "尚未开始" in body:
+        return "FAIL_PREPARE_REJECTED", "服务器说这一场还没开始（点早了）。"
     if "FIRE" not in tags:
         if "FAIL_NO_FLIP" in body:
             return "FAIL_NO_FLIP", "按钮一直没翻牌。"
@@ -102,10 +108,15 @@ def build(lines, run_id, out_dir, t0=None):
             r.fact("target button", msg.split("button", 1)[1].strip()[:120])
         elif tag == "FIRE" and "attempt" in msg:
             r.fact("flip->click", msg.strip())
+        elif tag == "FIRE" and "the session opens in" in msg:
+            r.fact("button ready before the session", msg.strip()[:120])
         elif tag == "REQ" and any(p in msg for p in ORDER_PATHS):
             r.fact("order request", "有")
         elif tag == "BODY" and "prepare-do" in msg:
             r.fact("page request after the click", "POST /dianshi/prepare-do")
+        elif tag == "RESP" and "prepare-do" in msg:
+            r.fact("the server's answer", msg.split("prepare-do", 1)[-1]
+                   .strip()[:300])
     for at, tag, msg in lines:
         if tag == "BODY" and "prepare-do" in msg:
             m = re.search(r"act_id=(\d+)", msg)

@@ -14,7 +14,8 @@ and counted. The codes:
     OK_ORDER_CREATED     the order exists -- the user still has to pay
     OK_USER_TOOK_OVER    the script stepped aside; the user clicks
     FAIL_NO_CARD         our card was never found on the page
-    FAIL_SOLD_OUT        the button said this session is sold out
+    FAIL_SOLD_OUT        the server (or the button) said this item is gone
+    FAIL_PREPARE_REJECTED the server refused to open the order at all
     FAIL_NO_FLIP         the button never became 立即抢购
     FAIL_CLICK_MISSED    the click did not land on the button
     FAIL_NO_DIALOG       we clicked, but no purchase panel appeared
@@ -24,6 +25,7 @@ and counted. The codes:
     FAIL_ORDER_REJECTED  the order API refused the request
     FAIL_NO_ORDER_REQ    we confirmed, but no order request went out
     FAIL_LOGIN           the page is not logged in
+    FAIL_INTERRUPTED     the run was killed before it could finish
     FAIL_UNKNOWN         it ended badly and we cannot say why
 """
 
@@ -55,8 +57,8 @@ VERDICTS = {
         "跑 check_target.py 看页面上到底有什么；多半是配置里的价格或规格写错了。"),
     "FAIL_SOLD_OUT": (
         "已抢光",
-        "按钮自己说这一场卖完了。",
-        "换下一场，或者手动看看别的地域/规格还有没有。"),
+        "服务器（或按钮自己）说这一场的货已经卖完了。",
+        "换下一场重跑脚本；下一场的开始时间看 SCHED 那几行。"),
     "FAIL_NO_FLIP": (
         "按钮没翻牌",
         "一直等到结束，按钮也没变成「立即抢购」。",
@@ -69,6 +71,11 @@ VERDICTS = {
         "没弹购买框",
         "点了「立即抢购」，但购买框没出来。",
         "多半是这一场本来就没库存，或者页面弹的是别的东西；截图会告诉你。"),
+    "FAIL_PREPARE_REJECTED": (
+        "接口拒绝了",
+        "点了「立即抢购」，但服务端拒绝了这次下单请求，购买框根本没开。",
+        "看报告里的「the server's answer」那一条：写「尚未开始」就是点早了"
+        "（b6 会等到整点再点）；写「已抢光」就换下一场。"),
     "FAIL_DIALOG_WRONG": (
         "弹窗不是我们的",
         "弹出了框，但里面的商品/价格不是我们要的那一个。",
@@ -93,6 +100,10 @@ VERDICTS = {
         "没登录",
         "页面跳到登录页了。",
         "跑 1-login.bat 重新扫码登录。"),
+    "FAIL_INTERRUPTED": (
+        "被中断了",
+        "脚本在结束之前就被关掉了（终端关了、窗口关了、Ctrl+C）。",
+        "看时间线最后几行：点到了没有、服务器怎么回答的。"),
     "FAIL_UNKNOWN": (
         "原因不明",
         "结束得不对，但没能归类。",
@@ -178,7 +189,9 @@ class Report:
     # ---- writing ------------------------------------------------------
 
     def _markdown(self):
-        code = self.verdict or "FAIL_UNKNOWN"
+        # a run that was killed before it could decide anything is not
+        # "unknown": it was interrupted, and the timeline says how far it got
+        code = self.verdict or "FAIL_INTERRUPTED"
         label, means, todo = VERDICTS.get(code, VERDICTS["FAIL_UNKNOWN"])
         out = []
         out.append("# 抢购结果：%s" % label)
@@ -235,12 +248,17 @@ class Report:
         return "\n".join(out)
 
     def write(self):
-        """Write the report. Safe to call twice."""
-        if self.written:
-            return self.dir
+        """Write the report. Safe to call as often as you like.
+
+        Every call writes the CURRENT state, so the file on disk is always
+        the newest thing that happened. That matters when the run is
+        killed: on 2026-10-28 the process was killed right after the sale
+        was lost, and the run folder was empty because the report was
+        only ever written at the very end.
+        """
         try:
             os.makedirs(self.dir, exist_ok=True)
-            code = self.verdict or "FAIL_UNKNOWN"
+            code = self.verdict or "FAIL_INTERRUPTED"
             label = VERDICTS.get(code, VERDICTS["FAIL_UNKNOWN"])[0]
             payload = {
                 "run_id": self.run_id,
